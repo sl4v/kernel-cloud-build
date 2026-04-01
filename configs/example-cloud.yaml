@@ -1,0 +1,63 @@
+# example-cloud.yaml — kcb configuration for Hetzner cloud builds.
+# Copy to ~/.kcb/config.yaml and fill in your API token.
+
+provider:
+  type: hetzner                          # Default when type is omitted
+  api_token: "${KCB_HETZNER_TOKEN}"      # or paste token directly; ${VAR} expansion is supported
+  server_type: cx43                      # cx23, cx33, cx43, cx53, cx63, cx73 etc.
+  location: fsn1                         # fsn1 (Falkenstein, DE), nbg1 (Nuremberg, DE), hel1 (Helsinki, FI),
+                                         # ash (Ashburn, US), hil (Hillsboro, US), sin (Singapore)
+  ssh_key_path: ~/.ssh/id_rsa            # Local SSH private key for VPS access
+
+# What to build. Remove or comment out entries to skip that component.
+components:
+  - kernel
+  - rootfs
+  - syzkaller
+
+kernel:
+  # Option A: clone from git (default)
+  git_url: https://github.com/torvalds/linux.git
+  branch: master
+
+  # Option B: download a tarball — mutually exclusive with branch
+  # tarball_url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz
+
+  # Architectures to build. Produces bzImage + vmlinux (x86_64) or Image + vmlinux (arm64).
+  targets:
+    - x86_64
+    - arm64
+
+  # Config overlays: applied in order after defconfig; later entries win.
+  # config_overlays:
+  #   - configs/kernel-overlays/fuzzing.config
+  #   - configs/kernel-overlays/ksmbd.config
+
+rootfs:
+  version: "2024.02"    # Buildroot release version
+  targets:
+    - x86_64
+    - arm64
+
+  # Config fragments: applied in order after defconfig; later entries win.
+  # config_fragments:
+  #   - configs/rootfs-fragments/ksmbd.config
+
+syzkaller:
+  # Target OS/arch pairs for syzkaller binaries (kernel-side tools).
+  targets:
+    - amd64
+    - arm64
+
+  # host_os: which OS(es) to compile host tools (syz-manager, syz-repro, etc.) for.
+  # "linux"  → HOSTOS=linux binaries, staged to host_{arch}/
+  # "macos"  → cross-compiles HOSTOS=darwin binaries, staged to host_darwin_{arch}/
+  host_os:
+    - linux
+    # - macos
+
+output_dir: ./kernel-builds    # Local directory to download artifacts into. Default: ./kcb-artifacts
+
+# Keep the VPS alive when a build step fails (default: destroy on failure).
+# The server ID is printed so you can clean it up later with: kcb cleanup <id>
+keep_on_failure: false

@@ -1,0 +1,61 @@
+# example-local.yaml — kcb configuration for builds on a pre-existing local VM.
+# Copy to ~/.kcb/config.yaml and fill in your machine's details.
+# No Hetzner account or API token required.
+
+provider:
+  type: local
+  host: 192.168.64.10       # IP or hostname of the build machine
+  port: 22                  # SSH port (default: 22)
+  username: root            # SSH username (default: root)
+  ssh_key_path: ~/.ssh/id_rsa
+  arch: x86_64              # Native architecture of the build machine: x86_64 or arm64.
+                            # Controls cross-toolchain selection.
+
+# What to build. Remove or comment out entries to skip that component.
+components:
+  - kernel
+  - rootfs
+  - syzkaller
+
+kernel:
+  # Option A: clone from git (default)
+  git_url: https://github.com/torvalds/linux.git
+  branch: master
+
+  # Option B: download a tarball — mutually exclusive with branch
+  # tarball_url: https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.9.tar.xz
+
+  # Architectures to build. Produces bzImage + vmlinux (x86_64) or Image + vmlinux (arm64).
+  targets:
+    - x86_64
+    - arm64
+
+  # Config overlays: applied in order after defconfig; later entries win.
+  # config_overlays:
+  #   - configs/kernel-overlays/fuzzing.config
+  #   - configs/kernel-overlays/ksmbd.config
+
+rootfs:
+  version: "2024.02"    # Buildroot release version
+  targets:
+    - x86_64
+    - arm64
+
+  # Config fragments: applied in order after defconfig; later entries win.
+  # config_fragments:
+  #   - configs/rootfs-fragments/ksmbd.config
+
+syzkaller:
+  # Target OS/arch pairs for syzkaller binaries (kernel-side tools).
+  targets:
+    - amd64
+    - arm64
+
+  # host_os: which OS(es) to compile host tools (syz-manager, syz-repro, etc.) for.
+  # "linux"  → HOSTOS=linux binaries, staged to host_{arch}/
+  # "macos"  → cross-compiles HOSTOS=darwin binaries, staged to host_darwin_{arch}/
+  host_os:
+    - linux
+    # - macos
+
+output_dir: ./kernel-builds    # Local directory to download artifacts into. Default: ./kcb-artifacts

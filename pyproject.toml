@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kcb"
+version = "0.1.0"
+description = "Kernel Cloud Build CLI — provisions ephemeral VPS, builds kernel/rootfs/syzkaller, downloads artifacts"
+requires-python = ">=3.10"
+dependencies = [
+    "click",
+    "pydantic>=2",
+    "asyncssh>=2.0",
+    "hcloud>=2.0",
+    "pyyaml",
+]
+
+[project.scripts]
+kcb = "kcb.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+
+# uv
+uv.lock
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Build artifacts
+kcb-artifacts/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Secrets / local config
+configs/my.yaml
+configs/my-local.yaml
+*.local.yaml
+
+# Claude Code
+.claude/settings.local.json
+
+.env
+PLAN.md
+
+kernel-builds/
+kernel-builds-local/
+
+CLAUDE.md
