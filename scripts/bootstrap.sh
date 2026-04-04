@@ -37,7 +37,8 @@ apt-get install -y --no-install-recommends \
     fakeroot \
     texinfo \
     m4 \
-    gettext
+    gettext \
+    e2fsprogs
 
 HOST_ARCH="$(uname -m)"
 echo "[bootstrap] Detected host arch: ${HOST_ARCH}"

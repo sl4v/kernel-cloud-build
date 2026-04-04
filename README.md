@@ -95,6 +95,10 @@ rootfs:
   config_fragments:                             # Optional Buildroot config fragments. Default: []
     - configs/rootfs-fragments/ksmbd.config     # Applied in order after defconfig; later entries win.
 
+  extra_space_mb: 600   # Add free space to the rootfs image after build (truncate + resize2fs).
+                        # Useful when pushing large files into the VM (e.g. kernel with symbols,
+                        # coverage agent). Default: 0 (no extra space).
+
 syzkaller:
   targets:            # Syzkaller target OS/arch pairs. Default: [amd64]
     - amd64
@@ -261,3 +265,9 @@ kcb-artifacts/
 - `rsync` installed locally (used to download artifacts from the VPS)
 - An SSH key at `~/.ssh/id_rsa` (or configured via `provider.ssh_key_path`)
 - A Hetzner Cloud account and API token (Hetzner provider only)
+
+The remote build server (Ubuntu 24.04) requires the following packages, all installed automatically by `bootstrap.sh`:
+
+| Package | Used for |
+|---------|----------|
+| `e2fsprogs` | `debugfs` (rootfs patching), `e2fsck` + `resize2fs` (`extra_space_mb` resizing) |
