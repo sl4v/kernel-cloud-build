@@ -43,6 +43,11 @@ rootfs:
   # config_fragments:
   #   - configs/rootfs-fragments/ksmbd.config
 
+  # Extra free space to add to the rootfs image after build (truncate + resize2fs).
+  # Useful when you need to push large files into the VM (e.g. kernel with symbols,
+  # coverage agent). Default: 0 (no extra space).
+  # extra_space_mb: 600
+
 syzkaller:
   # Target OS/arch pairs for syzkaller binaries (kernel-side tools).
   targets:

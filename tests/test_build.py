@@ -394,6 +394,32 @@ async def test_build_rootfs_arch_with_config_fragment(tmp_path: Path) -> None:
     assert merge_idx < old_idx, "olddefconfig must run after fragment merge"
 
 
+async def test_build_rootfs_arch_extra_space() -> None:
+    """build_rootfs_arch runs truncate+e2fsck+resize2fs when extra_space_mb > 0."""
+    executor = _make_executor()
+    config = _make_config(rootfs=BuildrootConfig(extra_space_mb=600))
+
+    await build_rootfs_arch(executor, config, "x86_64")
+
+    calls = [c.args[0] for c in executor.run.call_args_list]
+    resize_calls = [c for c in calls if "resize2fs" in c]
+    assert len(resize_calls) == 1, "Expected exactly one resize2fs call"
+    assert "truncate -s +600M" in resize_calls[0]
+    assert "e2fsck" in resize_calls[0]
+    assert "rootfs.ext4" in resize_calls[0]
+
+
+async def test_build_rootfs_arch_no_extra_space() -> None:
+    """build_rootfs_arch skips resize when extra_space_mb == 0 (default)."""
+    executor = _make_executor()
+    config = _make_config(rootfs=BuildrootConfig())
+
+    await build_rootfs_arch(executor, config, "x86_64")
+
+    calls = [c.args[0] for c in executor.run.call_args_list]
+    assert not any("resize2fs" in c for c in calls), "Unexpected resize2fs call"
+
+
 async def test_build_syzkaller() -> None:
     """build_syzkaller() issues git clone and per-arch make; returns syzkaller_bin."""
     executor = _make_executor()

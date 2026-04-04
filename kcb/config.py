@@ -79,6 +79,7 @@ class BuildrootConfig(BaseModel):
     version: str = "2024.02"
     targets: list[Literal["x86_64", "arm64"]] = ["x86_64"]
     config_fragments: list[Path] = []
+    extra_space_mb: int = 0
 
 
 class SyzkallerConfig(BaseModel):

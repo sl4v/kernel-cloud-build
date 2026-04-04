@@ -267,6 +267,15 @@ async def build_rootfs_arch(
         log_prefix=f"rootfs-patch-network-{arch}",
     )
 
+    if config.rootfs.extra_space_mb > 0:
+        n = config.rootfs.extra_space_mb
+        await executor.run(
+            f"truncate -s +{n}M {rootfs_image}"
+            f" && e2fsck -f -y {rootfs_image}"
+            f" && resize2fs {rootfs_image}",
+            log_prefix=f"rootfs-resize-{arch}",
+        )
+
     return {"rootfs": rootfs_image}
 
 
