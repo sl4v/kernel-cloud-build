@@ -71,7 +71,7 @@ def test_defaults_applied(tmp_path: Path) -> None:
 
     # ProviderConfig defaults
     assert config.provider.server_type == "cx23"
-    assert config.provider.location == "fsn1"
+    assert config.provider.location == "nbg1"
     assert config.provider.ssh_key_path == Path("~/.ssh/id_rsa").expanduser()
 
     # KernelConfig defaults

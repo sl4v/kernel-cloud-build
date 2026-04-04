@@ -101,6 +101,7 @@ def _make_build_ns(
     """
     bootstrap = AsyncMock(side_effect=bootstrap_side_effect)
     prepare_kernel_source = AsyncMock()
+    apply_kernel_patch = AsyncMock()
     build_kernel_arch = AsyncMock(
         return_value=_KERNEL_ARTIFACTS,
         side_effect=build_kernel_arch_side_effect,
@@ -118,6 +119,7 @@ def _make_build_ns(
     return types.SimpleNamespace(
         bootstrap=bootstrap,
         prepare_kernel_source=prepare_kernel_source,
+        apply_kernel_patch=apply_kernel_patch,
         build_kernel_arch=build_kernel_arch,
         prepare_rootfs_source=prepare_rootfs_source,
         build_rootfs_arch=build_rootfs_arch,

@@ -8,6 +8,7 @@ import pytest
 
 from kcb.build import (
     _SCRIPTS_DIR,
+    apply_kernel_patch,
     bootstrap,
     build_kernel_arch,
     build_rootfs_arch,
@@ -574,6 +575,54 @@ async def test_rsync_artifacts_raises_on_failure(tmp_path: Path) -> None:
                 {"vmlinux": "/root/linux/vmlinux"},
                 tmp_path / "out",
             )
+
+
+# ---------------------------------------------------------------------------
+# apply_kernel_patch()
+# ---------------------------------------------------------------------------
+
+
+async def test_apply_kernel_patch_uploads_and_runs(tmp_path: Path) -> None:
+    """apply_kernel_patch() uploads the patch file and runs patch -p1."""
+    executor = _make_executor()
+    patch_file = tmp_path / "kcov_remote.patch"
+    patch_file.write_text("--- a/foo.c\n+++ b/foo.c\n")
+    config = _make_config(kernel=KernelConfig(patch=patch_file))
+
+    await apply_kernel_patch(executor, config)
+
+    executor.upload_file.assert_called_once_with(patch_file, "/root/kernel.patch")
+    run_calls = [c.args[0] for c in executor.run.call_args_list]
+    assert any("patch -p1" in c and "/root/linux" in c for c in run_calls), (
+        "Expected patch -p1 -d /root/linux command"
+    )
+    assert any("/root/kernel.patch" in c for c in run_calls), (
+        "Expected /root/kernel.patch referenced in patch command"
+    )
+
+
+async def test_apply_kernel_patch_noop_when_no_patch() -> None:
+    """apply_kernel_patch() is a no-op when kernel.patch is None."""
+    executor = _make_executor()
+    config = _make_config()
+
+    await apply_kernel_patch(executor, config)
+
+    executor.upload_file.assert_not_called()
+    executor.run.assert_not_called()
+
+
+async def test_apply_kernel_patch_raises_on_patch_failure(tmp_path: Path) -> None:
+    """apply_kernel_patch() propagates RuntimeError when patch exits non-zero."""
+    executor = _make_executor()
+    patch_file = tmp_path / "bad.patch"
+    patch_file.write_text("garbage")
+    config = _make_config(kernel=KernelConfig(patch=patch_file))
+
+    executor.run = AsyncMock(side_effect=RuntimeError("Command failed with exit code 1"))
+
+    with pytest.raises(RuntimeError, match="exit code 1"):
+        await apply_kernel_patch(executor, config)
 
 
 # ---------------------------------------------------------------------------

@@ -62,6 +62,7 @@ class KernelConfig(BaseModel):
     git_url: str = "https://github.com/torvalds/linux.git"
     branch: str = "master"
     tarball_url: str | None = None
+    patch: Path | None = None
     config_overlays: list[Path] = []
     targets: list[Literal["x86_64", "arm64"]] = ["x86_64"]
 

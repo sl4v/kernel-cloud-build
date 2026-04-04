@@ -29,6 +29,7 @@ async def run(config: BuildConfig) -> None:
 
         if "kernel" in config.components:
             await _build.prepare_kernel_source(executor, config)
+            await _build.apply_kernel_patch(executor, config)
             for arch in config.kernel.targets:
                 kernel_artifacts = await _build.build_kernel_arch(executor, config, arch, provider.host_arch)
                 await _build.rsync_artifacts(host, provider.ssh_key_path, kernel_artifacts, config.output_dir / arch, username=provider.username, port=provider.port)
@@ -82,6 +83,8 @@ def main() -> None:
               help="Kernel target architecture (may be repeated).")
 @click.option("--kernel-config", "kernel_config_paths", type=click.Path(), multiple=True,
               help="Path to kernel config overlay file (may be repeated; applied in order).")
+@click.option("--kernel-patch", "kernel_patch_path", type=click.Path(), default=None,
+              help="Path to a unified diff patch applied to the kernel source before building.")
 @click.option("--rootfs-arch", "rootfs_archs", multiple=True,
               type=click.Choice(["x86_64", "arm64"]),
               help="Rootfs target architecture (may be repeated).")
@@ -98,6 +101,7 @@ def build(
     kernel_branch: Optional[str],
     kernel_archs: tuple[str, ...],
     kernel_config_paths: tuple[str, ...],
+    kernel_patch_path: Optional[str],
     rootfs_archs: tuple[str, ...],
     output_dir: Optional[str],
 ) -> None:
@@ -115,6 +119,8 @@ def build(
         overrides["kernel.targets"] = list(kernel_archs)
     if kernel_config_paths:
         overrides["kernel.config_overlays"] = [Path(p) for p in kernel_config_paths]
+    if kernel_patch_path is not None:
+        overrides["kernel.patch"] = Path(kernel_patch_path)
     if rootfs_archs:
         overrides["rootfs.targets"] = list(rootfs_archs)
     if output_dir is not None:
