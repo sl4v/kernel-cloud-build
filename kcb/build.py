@@ -68,6 +68,22 @@ async def prepare_kernel_source(executor: RemoteExecutor, config: BuildConfig) -
         )
 
 
+async def apply_kernel_patch(executor: RemoteExecutor, config: BuildConfig) -> None:
+    """Upload and apply config.kernel.patch to /root/linux with patch -p1.
+
+    No-op when config.kernel.patch is None.  Raises RuntimeError (via
+    executor.run check=True) if patch fails, which surfaces reject hunks or
+    compilation issues as a clear error before the build starts.
+    """
+    if config.kernel.patch is None:
+        return
+    await executor.upload_file(config.kernel.patch, "/root/kernel.patch")
+    await executor.run(
+        "patch -p1 -d /root/linux < /root/kernel.patch",
+        log_prefix="kernel-patch",
+    )
+
+
 def _kernel_cross_compile(host_arch: str, target_arch: str) -> str:
     """Return the CROSS_COMPILE prefix for a given host/target arch pair.
 
@@ -143,6 +159,17 @@ async def build_kernel_arch(
 
     return artifacts
 
+
+_S05DEBUGFS_SCRIPT = """\
+#!/bin/sh
+case "$1" in
+  start)
+    mount -t debugfs none /sys/kernel/debug
+    ;;
+  stop|restart|reload) ;;
+  *) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac
+"""
 
 _S40NETWORK_SCRIPT = """\
 #!/bin/sh
@@ -252,6 +279,19 @@ async def build_rootfs_arch(
         log_prefix=f"rootfs-build-{arch}",
     )
     rootfs_image = f"{output_dir}/images/rootfs.ext4"
+
+    # Patch S05debugfs: mount debugfs at /sys/kernel/debug so KCOV is accessible.
+    encoded_dbg = base64.b64encode(_S05DEBUGFS_SCRIPT.encode()).decode()
+    await executor.run(
+        f"echo '{encoded_dbg}' | base64 -d > /tmp/S05debugfs-{arch}",
+        log_prefix=f"rootfs-s05debugfs-{arch}",
+    )
+    await executor.run(
+        f"printf 'write /tmp/S05debugfs-{arch} etc/init.d/S05debugfs\\n"
+        f"set_inode_field /etc/init.d/S05debugfs i_mode 0100755\\n'"
+        f" | debugfs -w {rootfs_image}",
+        log_prefix=f"rootfs-patch-debugfs-{arch}",
+    )
 
     # Patch S40network: bring eth0 up explicitly before DHCP so udhcpc doesn't
     # silently fail on virtio-net devices that are link-DOWN at init time.
