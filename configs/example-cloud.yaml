@@ -48,6 +48,19 @@ rootfs:
   # coverage agent). Default: 0 (no extra space).
   # extra_space_mb: 600
 
+  # Commands to run on every boot, injected as /etc/init.d/S99custom.
+  # The SSH public key from provider.ssh_key_path is always injected into
+  # /root/.ssh/authorized_keys so you can SSH into the running VM.
+  # boot_commands:
+  #   - ksmbd.mountd &
+
+  # Arbitrary files to inject into the rootfs image. src is a local path;
+  # dest is the absolute path inside the rootfs. Parent directories are
+  # created automatically.
+  # extra_files:
+  #   - src: configs/ksmbd.conf
+  #     dest: /etc/ksmbd/ksmbd.conf
+
 syzkaller:
   # Target OS/arch pairs for syzkaller binaries (kernel-side tools).
   targets:

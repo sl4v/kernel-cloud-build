@@ -197,6 +197,21 @@ esac
 """
 
 
+def _make_custom_boot_script(commands: list[str]) -> str:
+    """Generate a BusyBox init.d script that runs commands at boot (start action)."""
+    cmd_lines = "\n".join(f"    {cmd}" for cmd in commands)
+    return (
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        "  start)\n"
+        f"{cmd_lines}\n"
+        "    ;;\n"
+        "  stop|restart|reload) ;;\n"
+        '  *) echo "Usage: $0 {start|stop}"; exit 1 ;;\n'
+        "esac\n"
+    )
+
+
 async def _apply_rootfs_config_fragments(
     executor: RemoteExecutor,
     config: BuildConfig,
@@ -306,6 +321,64 @@ async def build_rootfs_arch(
         f" | debugfs -w {rootfs_image}",
         log_prefix=f"rootfs-patch-network-{arch}",
     )
+
+    # Inject SSH authorized_keys so the built rootfs accepts the configured key.
+    # The public key is derived from provider.ssh_key_path by appending ".pub".
+    pub_key_path = Path(str(config.provider.ssh_key_path) + ".pub")
+    encoded_pub = base64.b64encode(pub_key_path.read_bytes()).decode()
+    await executor.run(
+        f"echo '{encoded_pub}' | base64 -d > /tmp/authorized_keys-{arch}",
+        log_prefix=f"rootfs-prep-authorized-keys-{arch}",
+    )
+    # Create /root/.ssh if absent (ignore error when it already exists).
+    await executor.run(
+        f"debugfs -w -R 'mkdir /root/.ssh' {rootfs_image}",
+        log_prefix=f"rootfs-mkdir-ssh-{arch}",
+        check=False,
+    )
+    await executor.run(
+        f"printf 'write /tmp/authorized_keys-{arch} root/.ssh/authorized_keys\\n"
+        f"set_inode_field /root/.ssh/authorized_keys i_mode 0100600\\n"
+        f"set_inode_field /root/.ssh i_mode 040700\\n'"
+        f" | debugfs -w {rootfs_image}",
+        log_prefix=f"rootfs-patch-authorized-keys-{arch}",
+    )
+
+    # Inject custom boot commands as S99custom init.d script if configured.
+    if config.rootfs.boot_commands:
+        custom_script = _make_custom_boot_script(config.rootfs.boot_commands)
+        encoded_custom = base64.b64encode(custom_script.encode()).decode()
+        await executor.run(
+            f"echo '{encoded_custom}' | base64 -d > /tmp/S99custom-{arch}",
+            log_prefix=f"rootfs-prep-s99custom-{arch}",
+        )
+        await executor.run(
+            f"printf 'write /tmp/S99custom-{arch} etc/init.d/S99custom\\n"
+            f"set_inode_field /etc/init.d/S99custom i_mode 0100755\\n'"
+            f" | debugfs -w {rootfs_image}",
+            log_prefix=f"rootfs-patch-s99custom-{arch}",
+        )
+
+    # Inject arbitrary extra files into the rootfs.
+    for idx, rf in enumerate(config.rootfs.extra_files):
+        remote_tmp = f"/tmp/rootfs-extra-{arch}-{idx}"
+        await executor.upload_file(rf.src, remote_tmp)
+        # Create each parent directory component (ignore errors — may already exist).
+        dest = rf.dest.lstrip("/")
+        parts = Path(dest).parts
+        for j in range(len(parts) - 1):
+            dir_path = "/" + "/".join(parts[: j + 1])
+            await executor.run(
+                f"debugfs -w -R 'mkdir {dir_path}' {rootfs_image}",
+                log_prefix=f"rootfs-extra-mkdir-{arch}-{idx}",
+                check=False,
+            )
+        await executor.run(
+            f"printf 'write {remote_tmp} {dest}\\n"
+            f"set_inode_field /{dest} i_mode 0100644\\n'"
+            f" | debugfs -w {rootfs_image}",
+            log_prefix=f"rootfs-extra-{arch}-{idx}",
+        )
 
     if config.rootfs.extra_space_mb > 0:
         n = config.rootfs.extra_space_mb

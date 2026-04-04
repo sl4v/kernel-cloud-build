@@ -76,11 +76,18 @@ class KernelConfig(BaseModel):
         return data
 
 
+class RootfsFile(BaseModel):
+    src: Path   # local path to the file
+    dest: str   # absolute path inside the rootfs, e.g. "/etc/ksmbd/ksmbd.conf"
+
+
 class BuildrootConfig(BaseModel):
     version: str = "2024.02"
     targets: list[Literal["x86_64", "arm64"]] = ["x86_64"]
     config_fragments: list[Path] = []
     extra_space_mb: int = 0
+    boot_commands: list[str] = []
+    extra_files: list[RootfsFile] = []
 
 
 class SyzkallerConfig(BaseModel):

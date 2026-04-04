@@ -22,6 +22,7 @@ from kcb.config import (
     BuildrootConfig,
     KernelConfig,
     ProviderConfig,
+    RootfsFile,
     SyzkallerConfig,
 )
 
@@ -38,12 +39,28 @@ def _make_executor() -> AsyncMock:
     return executor
 
 
-def _make_config(**kwargs) -> BuildConfig:
-    """Return a minimal BuildConfig with a dummy API token."""
+def _make_config(ssh_key_path: Path | None = None, **kwargs) -> BuildConfig:
+    """Return a minimal BuildConfig with a dummy API token.
+
+    ssh_key_path: path to the private key file; a corresponding .pub file must
+    exist when building rootfs.  Defaults to a sentinel path (tests that don't
+    exercise rootfs don't need a real key).
+    """
+    provider_kwargs: dict = {"api_token": "dummy-token"}
+    if ssh_key_path is not None:
+        provider_kwargs["ssh_key_path"] = ssh_key_path
     return BuildConfig(
-        provider=ProviderConfig(api_token="dummy-token"),
+        provider=ProviderConfig(**provider_kwargs),
         **kwargs,
     )
+
+
+def _setup_pub_key(tmp_path: Path) -> Path:
+    """Write a fake private key + .pub file; return the private key path."""
+    key = tmp_path / "id_rsa"
+    key.write_text("FAKE_PRIVATE_KEY")
+    (tmp_path / "id_rsa.pub").write_text("ssh-rsa AAAAB3NzaC1yc2E test@test\n")
+    return key
 
 
 # ---------------------------------------------------------------------------
@@ -325,11 +342,11 @@ async def test_prepare_rootfs_source() -> None:
     assert "rootfs-cleanup" in prefixes, "Expected log_prefix='rootfs-cleanup' for tarball rm"
 
 
-async def test_build_rootfs_arch_x86_64() -> None:
+async def test_build_rootfs_arch_x86_64(tmp_path: Path) -> None:
     """build_rootfs_arch x86_64: defconfig, ext4 config merge, build; no arm64 options."""
     executor = _make_executor()
     version = "2024.02"
-    config = _make_config(rootfs=BuildrootConfig(version=version))
+    config = _make_config(ssh_key_path=_setup_pub_key(tmp_path), rootfs=BuildrootConfig(version=version))
 
     result = await build_rootfs_arch(executor, config, "x86_64")
 
@@ -345,11 +362,11 @@ async def test_build_rootfs_arch_x86_64() -> None:
     assert result == {"rootfs": "/root/buildroot-output-x86_64/images/rootfs.ext4"}
 
 
-async def test_build_rootfs_arch_arm64() -> None:
+async def test_build_rootfs_arch_arm64(tmp_path: Path) -> None:
     """build_rootfs_arch arm64: defconfig, ext4+arm64 config merge, build."""
     executor = _make_executor()
     version = "2024.02"
-    config = _make_config(rootfs=BuildrootConfig(version=version))
+    config = _make_config(ssh_key_path=_setup_pub_key(tmp_path), rootfs=BuildrootConfig(version=version))
 
     result = await build_rootfs_arch(executor, config, "arm64")
 
@@ -376,7 +393,7 @@ async def test_build_rootfs_arch_with_config_fragment(tmp_path: Path) -> None:
     fragment.write_text("BR2_PACKAGE_KSMBD_TOOLS=y\n")
 
     executor = _make_executor()
-    config = _make_config(rootfs=BuildrootConfig(config_fragments=[fragment]))
+    config = _make_config(ssh_key_path=_setup_pub_key(tmp_path), rootfs=BuildrootConfig(config_fragments=[fragment]))
 
     await build_rootfs_arch(executor, config, "x86_64")
 
@@ -395,10 +412,10 @@ async def test_build_rootfs_arch_with_config_fragment(tmp_path: Path) -> None:
     assert merge_idx < old_idx, "olddefconfig must run after fragment merge"
 
 
-async def test_build_rootfs_arch_extra_space() -> None:
+async def test_build_rootfs_arch_extra_space(tmp_path: Path) -> None:
     """build_rootfs_arch runs truncate+e2fsck+resize2fs when extra_space_mb > 0."""
     executor = _make_executor()
-    config = _make_config(rootfs=BuildrootConfig(extra_space_mb=600))
+    config = _make_config(ssh_key_path=_setup_pub_key(tmp_path), rootfs=BuildrootConfig(extra_space_mb=600))
 
     await build_rootfs_arch(executor, config, "x86_64")
 
@@ -410,15 +427,108 @@ async def test_build_rootfs_arch_extra_space() -> None:
     assert "rootfs.ext4" in resize_calls[0]
 
 
-async def test_build_rootfs_arch_no_extra_space() -> None:
+async def test_build_rootfs_arch_no_extra_space(tmp_path: Path) -> None:
     """build_rootfs_arch skips resize when extra_space_mb == 0 (default)."""
     executor = _make_executor()
-    config = _make_config(rootfs=BuildrootConfig())
+    config = _make_config(ssh_key_path=_setup_pub_key(tmp_path), rootfs=BuildrootConfig())
 
     await build_rootfs_arch(executor, config, "x86_64")
 
     calls = [c.args[0] for c in executor.run.call_args_list]
     assert not any("resize2fs" in c for c in calls), "Unexpected resize2fs call"
+
+
+async def test_build_rootfs_arch_injects_authorized_keys(tmp_path: Path) -> None:
+    """build_rootfs_arch injects .pub key into rootfs /root/.ssh/authorized_keys via debugfs."""
+    key = _setup_pub_key(tmp_path)
+    executor = _make_executor()
+    config = _make_config(ssh_key_path=key, rootfs=BuildrootConfig())
+
+    await build_rootfs_arch(executor, config, "x86_64")
+
+    run_calls = [c.args[0] for c in executor.run.call_args_list]
+
+    # mkdir step (check=False)
+    assert any("mkdir /root/.ssh" in c for c in run_calls), "Expected debugfs mkdir /root/.ssh"
+
+    # write + set_inode_field step
+    assert any("authorized_keys" in c and "debugfs" in c for c in run_calls), (
+        "Expected debugfs write of authorized_keys"
+    )
+    # The public key content must be encoded and passed as part of the command
+    import base64
+    expected_pub = base64.b64encode((tmp_path / "id_rsa.pub").read_bytes()).decode()
+    assert any(expected_pub in c for c in run_calls), "Expected base64-encoded pub key in command"
+
+
+async def test_build_rootfs_arch_boot_commands(tmp_path: Path) -> None:
+    """build_rootfs_arch injects S99custom init script when boot_commands is set."""
+    key = _setup_pub_key(tmp_path)
+    executor = _make_executor()
+    config = _make_config(
+        ssh_key_path=key,
+        rootfs=BuildrootConfig(boot_commands=["ksmbd.mountd &", "echo started"]),
+    )
+
+    await build_rootfs_arch(executor, config, "x86_64")
+
+    run_calls = [c.args[0] for c in executor.run.call_args_list]
+
+    assert any("S99custom" in c and "debugfs" in c for c in run_calls), (
+        "Expected debugfs write of S99custom init script"
+    )
+    assert any("set_inode_field /etc/init.d/S99custom i_mode 0100755" in c for c in run_calls), (
+        "Expected S99custom to be chmod +x via set_inode_field"
+    )
+
+
+async def test_build_rootfs_arch_no_boot_commands(tmp_path: Path) -> None:
+    """build_rootfs_arch does not inject S99custom when boot_commands is empty."""
+    key = _setup_pub_key(tmp_path)
+    executor = _make_executor()
+    config = _make_config(ssh_key_path=key, rootfs=BuildrootConfig())
+
+    await build_rootfs_arch(executor, config, "x86_64")
+
+    run_calls = [c.args[0] for c in executor.run.call_args_list]
+    assert not any("S99custom" in c for c in run_calls), "Unexpected S99custom injection"
+
+
+async def test_build_rootfs_arch_extra_files(tmp_path: Path) -> None:
+    """build_rootfs_arch uploads extra_files and injects them via debugfs."""
+    key = _setup_pub_key(tmp_path)
+    conf_file = tmp_path / "ksmbd.conf"
+    conf_file.write_text("[global]\n")
+
+    executor = _make_executor()
+    config = _make_config(
+        ssh_key_path=key,
+        rootfs=BuildrootConfig(
+            extra_files=[RootfsFile(src=conf_file, dest="/etc/ksmbd/ksmbd.conf")]
+        ),
+    )
+
+    await build_rootfs_arch(executor, config, "x86_64")
+
+    upload_calls = [(c.args[0], c.args[1]) for c in executor.upload_file.call_args_list]
+    assert any(
+        src == conf_file and "/tmp/rootfs-extra-x86_64-0" in dest
+        for src, dest in upload_calls
+    ), "Expected extra file to be uploaded to /tmp/rootfs-extra-x86_64-0"
+
+    run_calls = [c.args[0] for c in executor.run.call_args_list]
+    # Parent directory /etc/ksmbd must be created
+    assert any("mkdir /etc/ksmbd" in c for c in run_calls), "Expected mkdir /etc/ksmbd"
+    # File must be written into the rootfs
+    assert any(
+        "write /tmp/rootfs-extra-x86_64-0" in c and "etc/ksmbd/ksmbd.conf" in c
+        for c in run_calls
+    ), "Expected debugfs write for extra file"
+
+
+# ---------------------------------------------------------------------------
+# 6. build_syzkaller()
+# ---------------------------------------------------------------------------
 
 
 async def test_build_syzkaller() -> None:

@@ -45,3 +45,6 @@ kernel-builds/
 kernel-builds-local/
 
 CLAUDE.md
+configs/*.local-file
+
+.claude/*
