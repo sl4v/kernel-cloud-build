@@ -61,11 +61,13 @@ provider:
   type: hetzner                          # Default when type is omitted
   api_token: "${KCB_HETZNER_TOKEN}"      # Required. ${VAR} expansion is supported.
   server_type: cx43                      # Hetzner server type.
-  location: fsn1                         # Hetzner datacenter location. Default: fsn1
+  location: nbg1                         # Hetzner datacenter location. Default: nbg1
                                          # Available: fsn1 (Falkenstein, DE), nbg1 (Nuremberg, DE),
                                          #            hel1 (Helsinki, FI), ash (Ashburn, US),
                                          #            hil (Hillsboro, US), sin (Singapore)
   ssh_key_path: ~/.ssh/id_rsa            # Local SSH private key for VPS access. Default: ~/.ssh/id_rsa
+                                         # The matching .pub file is also injected into
+                                         # /root/.ssh/authorized_keys in the built rootfs.
 
 components:                              # Which components to build. Default: [kernel, rootfs, syzkaller]
   - kernel
@@ -81,6 +83,11 @@ kernel:
   targets:                                    # Architectures to build. Default: [x86_64]
     - x86_64                                  #   produces bzImage + vmlinux
     - arm64                                   #   produces Image + vmlinux (cross-compiled)
+
+  patch: /path/to/kcov_remote.patch           # Optional unified diff patch applied to the kernel
+                                              # source tree before building (patch -p1). Use this
+                                              # to inject kcov_remote_start/end or other in-tree
+                                              # instrumentation. Default: null (no patch applied).
 
   config_overlays:                            # Optional kernel config fragments. Default: []
     - configs/kernel-overlays/fuzzing.config  # Applied in order after defconfig; later entries win.
@@ -98,6 +105,15 @@ rootfs:
   extra_space_mb: 600   # Add free space to the rootfs image after build (truncate + resize2fs).
                         # Useful when pushing large files into the VM (e.g. kernel with symbols,
                         # coverage agent). Default: 0 (no extra space).
+
+  boot_commands:        # Shell commands to run on every boot, injected as /etc/init.d/S99custom.
+    - ksmbd.mountd &    # Example: start ksmbd server in background.
+    - echo "VM ready"   # Commands run in the order listed under the start) action.
+
+  extra_files:          # Arbitrary local files to inject into the rootfs image. Default: []
+    - src: configs/ksmbd.conf       # Local path to the file.
+      dest: /etc/ksmbd/ksmbd.conf   # Absolute destination path inside the rootfs.
+                        # Parent directories are created automatically. File mode is 0644.
 
 syzkaller:
   targets:            # Syzkaller target OS/arch pairs. Default: [amd64]
@@ -123,7 +139,8 @@ provider:
   host: 192.168.64.10       # IP or hostname of the build machine
   port: 22                  # SSH port. Default: 22
   username: root            # SSH username. Default: root
-  ssh_key_path: ~/.ssh/id_rsa
+  ssh_key_path: ~/.ssh/id_rsa  # The matching .pub file is injected into /root/.ssh/authorized_keys
+                               # in the built rootfs.
   arch: x86_64              # Native architecture of the build machine: x86_64 or arm64.
                             # Controls cross-toolchain selection. Default: x86_64
 ```
@@ -163,10 +180,11 @@ kcb build [OPTIONS]
 | `--kernel-branch TEXT` | Kernel git branch. Overrides config. |
 | `--kernel-arch [x86_64\|arm64]` | Kernel target architecture. May be repeated. Overrides config. |
 | `--kernel-config PATH` | Path to a kernel config overlay fragment. May be repeated; applied in order. Overrides config. |
+| `--kernel-patch PATH` | Path to a unified diff patch applied to the kernel source before building (`patch -p1`). Overrides config. |
 | `--rootfs-arch [x86_64\|arm64]` | Rootfs target architecture. May be repeated. Overrides config. |
 | `--output-dir PATH` | Local directory for downloaded artifacts. Overrides config. |
 
-Rootfs `config_fragments` can only be set via the YAML config file; there is no CLI flag for them.
+Rootfs `config_fragments`, `boot_commands`, and `extra_files` can only be set via the YAML config file; there are no CLI flags for them.
 
 **Examples:**
 
