@@ -85,6 +85,8 @@ def main() -> None:
               help="Path to kernel config overlay file (may be repeated; applied in order).")
 @click.option("--kernel-patch", "kernel_patch_path", type=click.Path(), default=None,
               help="Path to a unified diff patch applied to the kernel source before building.")
+@click.option("--kernel-headers/--no-kernel-headers", "kernel_download_headers", default=None,
+              help="Run headers_install after kernel build and download headers as artifacts.")
 @click.option("--rootfs-arch", "rootfs_archs", multiple=True,
               type=click.Choice(["x86_64", "arm64"]),
               help="Rootfs target architecture (may be repeated).")
@@ -102,6 +104,7 @@ def build(
     kernel_archs: tuple[str, ...],
     kernel_config_paths: tuple[str, ...],
     kernel_patch_path: Optional[str],
+    kernel_download_headers: Optional[bool],
     rootfs_archs: tuple[str, ...],
     output_dir: Optional[str],
 ) -> None:
@@ -121,6 +124,8 @@ def build(
         overrides["kernel.config_overlays"] = [Path(p) for p in kernel_config_paths]
     if kernel_patch_path is not None:
         overrides["kernel.patch"] = Path(kernel_patch_path)
+    if kernel_download_headers is not None:
+        overrides["kernel.download_headers"] = kernel_download_headers
     if rootfs_archs:
         overrides["rootfs.targets"] = list(rootfs_archs)
     if output_dir is not None:

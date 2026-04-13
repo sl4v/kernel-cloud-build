@@ -65,6 +65,7 @@ class KernelConfig(BaseModel):
     patch: Path | None = None
     config_overlays: list[Path] = []
     targets: list[Literal["x86_64", "arm64"]] = ["x86_64"]
+    download_headers: bool = True
 
     @model_validator(mode="before")
     @classmethod

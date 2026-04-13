@@ -79,7 +79,8 @@ async def apply_kernel_patch(executor: RemoteExecutor, config: BuildConfig) -> N
         return
     await executor.upload_file(config.kernel.patch, "/root/kernel.patch")
     await executor.run(
-        "patch -p1 -d /root/linux < /root/kernel.patch",
+        "patch --dry-run -R -p1 -d /root/linux < /root/kernel.patch 2>/dev/null"
+        " || patch -p1 -d /root/linux < /root/kernel.patch",
         log_prefix="kernel-patch",
     )
 
@@ -135,6 +136,12 @@ async def build_kernel_arch(
         )
         artifacts["bzImage"] = "/root/linux/arch/x86/boot/bzImage"
         artifacts["vmlinux"] = "/root/linux/vmlinux"
+        if config.kernel.download_headers:
+            await executor.run(
+                f"make -C /root/linux ARCH=x86_64{cross_flags} headers_install INSTALL_HDR_PATH=/root/kernel-headers-x86_64",
+                log_prefix="kernel-headers-x86_64",
+            )
+            artifacts["headers"] = "/root/kernel-headers-x86_64"
 
     elif arch == "arm64":
         cross_flags = f" CROSS_COMPILE={cross}" if cross else ""
@@ -153,6 +160,12 @@ async def build_kernel_arch(
         )
         artifacts["Image"] = "/root/linux/arch/arm64/boot/Image"
         artifacts["vmlinux"] = "/root/linux/vmlinux"
+        if config.kernel.download_headers:
+            await executor.run(
+                f"make -C /root/linux ARCH=arm64{cross_flags} headers_install INSTALL_HDR_PATH=/root/kernel-headers-arm64",
+                log_prefix="kernel-headers-arm64",
+            )
+            artifacts["headers"] = "/root/kernel-headers-arm64"
 
     else:
         raise ValueError(f"Unsupported kernel arch: {arch}")
