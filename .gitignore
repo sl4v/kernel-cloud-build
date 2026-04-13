@@ -48,3 +48,4 @@ CLAUDE.md
 configs/*.local-file
 
 .claude/*
+*.patch
