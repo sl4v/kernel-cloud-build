@@ -44,6 +44,7 @@ rootfs:
   # Config fragments: applied in order after defconfig; later entries win.
   # config_fragments:
   #   - configs/rootfs-fragments/ksmbd.config
+  #   - configs/rootfs-fragments/devtools.config   # runtime/debugging tools only; no native gcc in Buildroot guests
 
 syzkaller:
   # Target OS/arch pairs for syzkaller binaries (kernel-side tools).
