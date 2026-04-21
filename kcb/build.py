@@ -5,14 +5,14 @@ import base64
 from pathlib import Path
 
 from kcb.config import BuildConfig
-from kcb.executor import RemoteExecutor
+from kcb.executor import CommandExecutor
 
 # Path to bootstrap.sh relative to this file: ../../scripts/bootstrap.sh
 _SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 
 
 async def bootstrap(
-    executor: RemoteExecutor,
+    executor: CommandExecutor,
     config: BuildConfig,
     host_arch: str = "x86_64",
 ) -> None:
@@ -34,7 +34,7 @@ async def bootstrap(
 
 
 async def _apply_config_overlays(
-    executor: RemoteExecutor, config: BuildConfig, arch: str
+    executor: CommandExecutor, config: BuildConfig, arch: str
 ) -> None:
     """Upload each config overlay and merge it into /root/linux/.config in order."""
     for i, overlay in enumerate(config.kernel.config_overlays):
@@ -46,7 +46,7 @@ async def _apply_config_overlays(
         )
 
 
-async def prepare_kernel_source(executor: RemoteExecutor, config: BuildConfig) -> None:
+async def prepare_kernel_source(executor: CommandExecutor, config: BuildConfig) -> None:
     """Download/clone the kernel source tree to /root/linux (once, arch-independent)."""
     if config.kernel.tarball_url:
         tarball_url = config.kernel.tarball_url
@@ -68,7 +68,7 @@ async def prepare_kernel_source(executor: RemoteExecutor, config: BuildConfig) -
         )
 
 
-async def apply_kernel_patch(executor: RemoteExecutor, config: BuildConfig) -> None:
+async def apply_kernel_patch(executor: CommandExecutor, config: BuildConfig) -> None:
     """Upload and apply config.kernel.patch to /root/linux with patch -p1.
 
     No-op when config.kernel.patch is None.  Raises RuntimeError (via
@@ -100,7 +100,7 @@ def _kernel_cross_compile(host_arch: str, target_arch: str) -> str:
 
 
 async def build_kernel_arch(
-    executor: RemoteExecutor,
+    executor: CommandExecutor,
     config: BuildConfig,
     arch: str,
     host_arch: str = "x86_64",
@@ -226,7 +226,7 @@ def _make_custom_boot_script(commands: list[str]) -> str:
 
 
 async def _apply_rootfs_config_fragments(
-    executor: RemoteExecutor,
+    executor: CommandExecutor,
     config: BuildConfig,
     arch: str,
     output_dir: str,
@@ -242,7 +242,7 @@ async def _apply_rootfs_config_fragments(
         )
 
 
-async def prepare_rootfs_source(executor: RemoteExecutor, config: BuildConfig) -> None:
+async def prepare_rootfs_source(executor: CommandExecutor, config: BuildConfig) -> None:
     """Download and extract the Buildroot tarball to /root/buildroot-<version>."""
     version = config.rootfs.version
     tarball_url = f"https://buildroot.org/downloads/buildroot-{version}.tar.gz"
@@ -257,7 +257,7 @@ async def prepare_rootfs_source(executor: RemoteExecutor, config: BuildConfig) -
 
 
 async def build_rootfs_arch(
-    executor: RemoteExecutor,
+    executor: CommandExecutor,
     config: BuildConfig,
     arch: str,
     host_arch: str = "x86_64",
@@ -417,7 +417,7 @@ _SYZKALLER_HOST_BINS = [
 ]
 
 
-async def build_syzkaller(executor: RemoteExecutor, config: BuildConfig) -> dict[str, dict[str, str]]:
+async def build_syzkaller(executor: CommandExecutor, config: BuildConfig) -> dict[str, dict[str, str]]:
     """Clone and build syzkaller for each configured target arch.
 
     Sets HOSTOS/HOSTARCH so host tools (syz-manager etc.) are also built for
@@ -521,3 +521,28 @@ async def rsync_artifacts(
         raise RuntimeError("rsync timed out after 1 hour")
     if rc != 0:
         raise RuntimeError(f"rsync exited with code {rc}")
+
+
+async def docker_cp_artifacts(
+    container_name: str,
+    artifacts: dict[str, str],
+    local_dest: Path,
+) -> None:
+    """Copy artifact paths from a container to local_dest using docker cp."""
+    local_dest.mkdir(parents=True, exist_ok=True)
+
+    for remote_path in artifacts.values():
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "cp",
+            f"{container_name}:{remote_path}",
+            f"{local_dest}/",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode().strip()
+            raise RuntimeError(
+                f"docker cp failed with exit code {proc.returncode} for {remote_path}: {err}"
+            )

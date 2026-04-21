@@ -1,16 +1,14 @@
-# example-local.yaml — kcb configuration for builds on a pre-existing local VM.
-# For local Docker builds, use configs/example-docker.yaml instead.
-# Copy to ~/.kcb/config.yaml and fill in your machine's details.
-# No Hetzner account or API token required.
+# example-docker.yaml — kcb configuration for builds in a local Docker container.
+# Copy to ~/.kcb/config.yaml and adjust as needed.
+# Requires a working local Docker daemon.
 
 provider:
-  type: local
-  host: 192.168.64.10       # IP or hostname of the build machine
-  port: 22                  # SSH port (default: 22)
-  username: root            # SSH username (default: root)
+  type: docker
+  image: ubuntu:24.04         # Base image used for the build container.
+  container_name: kcb-build   # Optional. Remove to let kcb generate a unique name.
   ssh_key_path: ~/.ssh/id_rsa
-  arch: x86_64              # Native architecture of the build machine: x86_64 or arm64.
-                            # Controls cross-toolchain selection.
+  arch: x86_64                # Native architecture inside the container: x86_64 or arm64.
+                              # Controls cross-toolchain selection.
 
 # What to build. Remove or comment out entries to skip that component.
 components:
@@ -45,7 +43,7 @@ rootfs:
   # Config fragments: applied in order after defconfig; later entries win.
   # config_fragments:
   #   - configs/rootfs-fragments/ksmbd.config
-  #   - configs/rootfs-fragments/devtools.config   # runtime/debugging tools only; no native gcc in Buildroot guests
+  #   - configs/rootfs-fragments/devtools.config
 
 syzkaller:
   # Target OS/arch pairs for syzkaller binaries (kernel-side tools).
@@ -61,3 +59,7 @@ syzkaller:
     # - macos
 
 output_dir: ./kernel-builds    # Local directory to download artifacts into. Default: ./kcb-artifacts
+
+# Keep the container alive when a build step fails (default: destroy on failure).
+# kcb prints a docker exec command so you can inspect the failed environment.
+keep_on_failure: false

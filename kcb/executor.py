@@ -1,6 +1,8 @@
-"""Remote SSH executor using asyncssh."""
+"""Command executors for SSH and local Docker containers."""
 
+import asyncio
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 import asyncssh
 
@@ -8,6 +10,23 @@ import asyncssh
 def _colored(text: str, ansi_code: int) -> str:
     """Wrap text in an ANSI color escape sequence."""
     return f"\033[{ansi_code}m{text}\033[0m"
+
+
+@runtime_checkable
+class CommandExecutor(Protocol):
+    """Minimal executor interface used by the build steps."""
+
+    async def connect(self) -> None:
+        ...
+
+    async def run(self, cmd: str, *, log_prefix: str = "", check: bool = True) -> int:
+        ...
+
+    async def upload_file(self, local: Path, remote: str) -> None:
+        ...
+
+    async def disconnect(self) -> None:
+        ...
 
 
 class RemoteExecutor:
@@ -90,3 +109,58 @@ class RemoteExecutor:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+
+class DockerExecutor:
+    """Executes build commands inside a local Docker container."""
+
+    def __init__(self, container_name: str) -> None:
+        self.container_name = container_name
+
+    async def connect(self) -> None:
+        """Docker exec is stateless; container startup is handled by the provider."""
+        return None
+
+    async def run(self, cmd: str, *, log_prefix: str = "", check: bool = True) -> int:
+        """Run a shell command in the container and stream its output."""
+        prefix_text = f"[{log_prefix}]" if log_prefix else "[docker]"
+        prefix = _colored(prefix_text, 33)  # 33 = yellow
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "exec",
+            self.container_name,
+            "bash",
+            "-lc",
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        async def _stream(stream: asyncio.StreamReader) -> None:
+            async for line in stream:
+                print(f"{prefix} {line.decode().rstrip()}", flush=True)
+
+        await asyncio.gather(_stream(proc.stdout), _stream(proc.stderr))
+        rc = await proc.wait()
+        if check and rc != 0:
+            raise RuntimeError(f"Command failed with exit code {rc}: {cmd}")
+        return rc
+
+    async def upload_file(self, local: Path, remote: str) -> None:
+        """Copy a local file into the container."""
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "cp",
+            str(local),
+            f"{self.container_name}:{remote}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode().strip()
+            raise RuntimeError(f"docker cp failed with exit code {proc.returncode}: {err}")
+
+    async def disconnect(self) -> None:
+        """No-op: docker exec does not maintain a persistent session."""
+        return None

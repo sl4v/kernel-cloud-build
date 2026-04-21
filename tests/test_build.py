@@ -13,6 +13,7 @@ from kcb.build import (
     build_kernel_arch,
     build_rootfs_arch,
     build_syzkaller,
+    docker_cp_artifacts,
     prepare_kernel_source,
     prepare_rootfs_source,
     rsync_artifacts,
@@ -682,6 +683,44 @@ async def test_rsync_artifacts_raises_on_failure(tmp_path: Path) -> None:
             await rsync_artifacts(
                 "1.2.3.4",
                 Path("/tmp/id_rsa"),
+                {"vmlinux": "/root/linux/vmlinux"},
+                tmp_path / "out",
+            )
+
+
+async def test_docker_cp_artifacts(tmp_path: Path) -> None:
+    """docker_cp_artifacts() copies each artifact into the local output directory."""
+    local_dest = tmp_path / "out"
+    fake_proc = MagicMock()
+    fake_proc.communicate = AsyncMock(return_value=(b"", b""))
+    fake_proc.returncode = 0
+
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)) as mock_exec:
+        await docker_cp_artifacts(
+            "kcb-dev",
+            {
+                "vmlinux": "/root/linux/vmlinux",
+                "linux_amd64": "/root/syzkaller/bin/linux_amd64",
+            },
+            local_dest,
+        )
+
+    assert local_dest.exists()
+    assert mock_exec.await_count == 2
+    first_args = mock_exec.await_args_list[0].args
+    assert first_args[:3] == ("docker", "cp", "kcb-dev:/root/linux/vmlinux")
+
+
+async def test_docker_cp_artifacts_raises_on_failure(tmp_path: Path) -> None:
+    """docker_cp_artifacts() raises when docker cp exits non-zero."""
+    fake_proc = MagicMock()
+    fake_proc.communicate = AsyncMock(return_value=(b"", b"copy failed"))
+    fake_proc.returncode = 1
+
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=fake_proc)):
+        with pytest.raises(RuntimeError, match="docker cp failed with exit code 1"):
+            await docker_cp_artifacts(
+                "kcb-dev",
                 {"vmlinux": "/root/linux/vmlinux"},
                 tmp_path / "out",
             )

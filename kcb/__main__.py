@@ -11,19 +11,19 @@ import click
 
 from kcb import build as _build
 from kcb import hetzner
-from kcb.config import BuildConfig, LocalVMConfig, load_config
-from kcb.executor import RemoteExecutor
+from kcb.config import BuildConfig, HetznerConfig, load_config
 from kcb.providers import make_provider
 
 
 async def run(config: BuildConfig) -> None:
     """Main orchestration flow: provision -> setup -> build -> download -> destroy."""
     provider = make_provider(config)
+    executor = None
     host = ""
     success = False
     try:
         host = await provider.provision()
-        executor = RemoteExecutor(host=host, username=provider.username, key_path=provider.ssh_key_path, port=provider.port)
+        executor = provider.make_executor(host)
         await executor.connect()
         await _build.bootstrap(executor, config, provider.host_arch)
 
@@ -32,31 +32,35 @@ async def run(config: BuildConfig) -> None:
             await _build.apply_kernel_patch(executor, config)
             for arch in config.kernel.targets:
                 kernel_artifacts = await _build.build_kernel_arch(executor, config, arch, provider.host_arch)
-                await _build.rsync_artifacts(host, provider.ssh_key_path, kernel_artifacts, config.output_dir / arch, username=provider.username, port=provider.port)
+                await provider.download_artifacts(host, kernel_artifacts, config.output_dir / arch)
                 await executor.run("make -C /root/linux clean", log_prefix=f"kernel-clean-{arch}")
 
         if "rootfs" in config.components:
             await _build.prepare_rootfs_source(executor, config)
             for arch in config.rootfs.targets:
                 rootfs_artifacts = await _build.build_rootfs_arch(executor, config, arch, provider.host_arch)
-                await _build.rsync_artifacts(host, provider.ssh_key_path, rootfs_artifacts, config.output_dir / arch, username=provider.username, port=provider.port)
+                await provider.download_artifacts(host, rootfs_artifacts, config.output_dir / arch)
                 await executor.run(f"rm -rf /root/buildroot-output-{arch}", log_prefix=f"rootfs-clean-{arch}")
 
         if "syzkaller" in config.components:
             syz_artifacts = await _build.build_syzkaller(executor, config)
             for local_arch, arch_artifacts in syz_artifacts.items():
-                await _build.rsync_artifacts(host, provider.ssh_key_path, arch_artifacts, config.output_dir / local_arch, username=provider.username, port=provider.port)
+                await provider.download_artifacts(host, arch_artifacts, config.output_dir / local_arch)
 
         success = True
     finally:
-        await provider.teardown(success, host)
-        remaining = await provider.list_managed()
-        if remaining:
-            print(f"[kcb] Remaining kcb-managed servers ({len(remaining)}):")
-            for s in remaining:
-                print(f"  id={s.server_id}  name={s.label}  created={s.created_at}")
-        else:
-            print("[kcb] No kcb-managed servers remaining.")
+        try:
+            if executor is not None:
+                await executor.disconnect()
+        finally:
+            await provider.teardown(success, host)
+            remaining = await provider.list_managed()
+            if remaining:
+                print(f"[kcb] Remaining kcb-managed resources ({len(remaining)}):")
+                for s in remaining:
+                    print(f"  id={s.server_id}  name={s.label}  created={s.created_at}")
+            else:
+                print("[kcb] No kcb-managed resources remaining.")
 
 
 @click.group()
@@ -210,8 +214,8 @@ def cleanup(
     except Exception as exc:
         raise click.ClickException(f"Failed to load config: {exc}") from exc
 
-    if isinstance(config.provider, LocalVMConfig):
-        click.echo("cleanup is not applicable for local provider")
+    if not isinstance(config.provider, HetznerConfig):
+        click.echo("cleanup is only applicable to the Hetzner provider")
         return
 
     if list_servers_flag:

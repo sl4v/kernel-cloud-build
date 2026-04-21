@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from kcb.config import (
     BuildConfig,
     BuildrootConfig,
+    DockerConfig,
     HetznerConfig,
     KernelConfig,
     LocalVMConfig,
@@ -408,7 +409,7 @@ def test_full_yaml_round_trip(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 7. Discriminated union: HetznerConfig / LocalVMConfig
+# 7. Discriminated union: HetznerConfig / LocalVMConfig / DockerConfig
 # ---------------------------------------------------------------------------
 
 
@@ -512,6 +513,68 @@ def test_local_provider_no_token_required(
 
     assert isinstance(config.provider, LocalVMConfig)
     assert config.provider.host == "192.168.64.10"
+
+
+def test_docker_provider_yaml_round_trip(tmp_path: Path) -> None:
+    """YAML with type: docker loads correctly as DockerConfig."""
+    cfg_file = write_yaml(
+        tmp_path,
+        """\
+        provider:
+          type: docker
+          image: ubuntu:24.04
+          container_name: kcb-dev
+          ssh_key_path: ~/.ssh/id_ed25519
+          arch: arm64
+        """,
+    )
+
+    config = load_config(cfg_file)
+
+    assert isinstance(config.provider, DockerConfig)
+    assert config.provider.type == "docker"
+    assert config.provider.image == "ubuntu:24.04"
+    assert config.provider.container_name == "kcb-dev"
+    assert config.provider.arch == "arm64"
+    assert config.provider.ssh_key_path == Path("~/.ssh/id_ed25519").expanduser()
+
+
+def test_docker_provider_defaults(tmp_path: Path) -> None:
+    """DockerConfig should have correct default values."""
+    cfg_file = write_yaml(
+        tmp_path,
+        """\
+        provider:
+          type: docker
+        """,
+    )
+
+    config = load_config(cfg_file)
+
+    assert isinstance(config.provider, DockerConfig)
+    assert config.provider.image == "ubuntu:24.04"
+    assert config.provider.container_name is None
+    assert config.provider.arch == "x86_64"
+    assert config.provider.ssh_key_path == Path("~/.ssh/id_rsa").expanduser()
+
+
+def test_docker_provider_no_token_required(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Docker provider should load successfully without api_token and env fallback."""
+    monkeypatch.delenv("KCB_HETZNER_TOKEN", raising=False)
+
+    cfg_file = write_yaml(
+        tmp_path,
+        """\
+        provider:
+          type: docker
+        """,
+    )
+
+    config = load_config(cfg_file)
+
+    assert isinstance(config.provider, DockerConfig)
 
 
 def test_provider_config_alias_is_hetzner_config() -> None:

@@ -1,12 +1,14 @@
 # kcb — Kernel Cloud Build
 
-`kcb` is a Python CLI that provisions an ephemeral Hetzner VPS (or connects to a local VM), builds Linux kernel images, a Buildroot rootfs, and Syzkaller binaries on it, downloads the artifacts via rsync, then destroys the VPS. The full build runs remotely.
+`kcb` is a Python CLI that provisions an ephemeral Hetzner VPS, connects to a local VM, or starts a local Docker container, then builds Linux kernel images, a Buildroot rootfs, and Syzkaller binaries there and downloads the artifacts. The full build still runs outside the local Python process.
 
 ---
 
 ## Install
 
-Requires Python 3.10+ and `rsync` installed locally.
+Requires Python 3.10+ plus provider-specific tooling:
+- `rsync` for the Hetzner and local VM providers
+- Docker for the Docker provider
 
 ```bash
 pip install .
@@ -14,7 +16,7 @@ pip install .
 uv pip install .
 ```
 
-You also need a Hetzner Cloud API token (unless using a local VM). Set it as an environment variable:
+You also need a Hetzner Cloud API token when using the Hetzner provider. Set it as an environment variable:
 
 ```bash
 export KCB_HETZNER_TOKEN=your_token_here
@@ -42,6 +44,8 @@ To use a config file instead:
 cp configs/example-cloud.yaml ~/.kcb/config.yaml
 # For local VM builds:
 cp configs/example-local.yaml ~/.kcb/config.yaml
+# For local Docker builds:
+cp configs/example-docker.yaml ~/.kcb/config.yaml
 # Edit ~/.kcb/config.yaml to set your preferences
 kcb build --config ~/.kcb/config.yaml
 ```
@@ -150,6 +154,27 @@ With the local provider:
 - `keep_on_failure` has no effect — the machine is never destroyed.
 - `kcb cleanup` is not applicable and will exit with a message.
 
+#### Docker provider
+
+Use a local Docker container instead of a VPS or pre-existing VM. `kcb` starts a detached container, bootstraps it like the cloud image, copies artifacts back with `docker cp`, and removes the container at the end unless `keep_on_failure: true`.
+
+```yaml
+provider:
+  type: docker
+  image: ubuntu:24.04         # Base image used for the build container. Default: ubuntu:24.04
+  container_name: kcb-build   # Optional fixed container name. Default: null (auto-generated)
+  ssh_key_path: ~/.ssh/id_rsa # The matching .pub file is injected into /root/.ssh/authorized_keys
+                              # in the built rootfs.
+  arch: x86_64                # Native architecture inside the container: x86_64 or arm64.
+                              # Controls cross-toolchain selection. Default: x86_64
+```
+
+With the Docker provider:
+- No API token is required.
+- Docker must be installed locally and the daemon must be running.
+- `keep_on_failure: true` keeps the container alive and prints a `docker exec` command for debugging.
+- `kcb cleanup` is not applicable and will exit with a message.
+
 ### Environment variables
 
 | Variable            | Description                                  |
@@ -162,7 +187,7 @@ With the local provider:
 
 ### `kcb build`
 
-Provision a VPS (or connect to a local VM), run the build, download artifacts, destroy the VPS.
+Provision a VPS, connect to a local VM, or start a local Docker container, run the build, and download artifacts.
 
 ```
 kcb build [OPTIONS]
@@ -174,7 +199,7 @@ kcb build [OPTIONS]
 | `--kernel / --no-kernel` | Include or exclude kernel from the build. |
 | `--rootfs / --no-rootfs` | Include or exclude rootfs from the build. |
 | `--syzkaller / --no-syzkaller` | Include or exclude syzkaller from the build. |
-| `--keep-on-failure` | Keep the VPS alive if the build fails. Prints the server ID for later cleanup. (Hetzner provider only.) |
+| `--keep-on-failure` | Keep the Hetzner VPS or Docker container alive if the build fails. No effect for the local VM provider. |
 | `--server-type TEXT` | Hetzner server type, e.g. `cx43`. Overrides config. |
 | `--kernel-url TEXT` | Kernel git URL. Overrides config. |
 | `--kernel-branch TEXT` | Kernel git branch. Overrides config. |
@@ -192,7 +217,7 @@ Rootfs `config_fragments`, `boot_commands`, and `extra_files` can only be set vi
 # Full build with defaults
 kcb build
 
-# Build only kernel and rootfs, keep VPS on failure
+# Build only kernel and rootfs, keep the build target alive on failure
 kcb build --kernel --rootfs --keep-on-failure
 
 # Custom kernel, arm64 cross-compile, config overlay
@@ -219,13 +244,16 @@ kcb build --server-type cx43
 
 # Build on a local VM (provider.type: local in config)
 kcb build --config ~/.kcb/local.yaml
+
+# Build in a local Docker container (provider.type: docker in config)
+kcb build --config ~/.kcb/docker.yaml
 ```
 
 ---
 
 ### `kcb cleanup`
 
-List or destroy kcb-managed VPS instances. Useful for orphaned servers left behind by `--keep-on-failure` or interrupted runs. Not applicable when using the local provider.
+List or destroy kcb-managed VPS instances. Useful for orphaned Hetzner servers left behind by `--keep-on-failure` or interrupted runs. Not applicable when using the local VM or Docker providers.
 
 ```
 kcb cleanup [OPTIONS] [SERVER_ID]
@@ -280,7 +308,8 @@ kcb-artifacts/
 ## Requirements
 
 - Python 3.10+
-- `rsync` installed locally (used to download artifacts from the VPS)
+- `rsync` installed locally when using the Hetzner or local VM providers
+- Docker installed locally when using the Docker provider
 - An SSH key at `~/.ssh/id_rsa` (or configured via `provider.ssh_key_path`)
 - A Hetzner Cloud account and API token (Hetzner provider only)
 

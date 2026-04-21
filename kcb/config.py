@@ -58,6 +58,19 @@ class LocalVMConfig(BaseModel):
         return self
 
 
+class DockerConfig(BaseModel):
+    type: Literal["docker"] = "docker"
+    image: str = "ubuntu:24.04"
+    container_name: str | None = None
+    ssh_key_path: Path = Path("~/.ssh/id_rsa")
+    arch: Literal["x86_64", "arm64"] = "x86_64"
+
+    @model_validator(mode="after")
+    def expand_ssh_key_path(self) -> "DockerConfig":
+        self.ssh_key_path = self.ssh_key_path.expanduser()
+        return self
+
+
 class KernelConfig(BaseModel):
     git_url: str = "https://github.com/torvalds/linux.git"
     branch: str = "master"
@@ -97,7 +110,10 @@ class SyzkallerConfig(BaseModel):
 
 
 class BuildConfig(BaseModel):
-    provider: Annotated[HetznerConfig | LocalVMConfig, Field(discriminator="type")]
+    provider: Annotated[
+        HetznerConfig | LocalVMConfig | DockerConfig,
+        Field(discriminator="type"),
+    ]
     kernel: KernelConfig = Field(default_factory=KernelConfig)
     rootfs: BuildrootConfig = Field(default_factory=BuildrootConfig)
     syzkaller: SyzkallerConfig = Field(default_factory=SyzkallerConfig)
